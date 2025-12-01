@@ -1,0 +1,169 @@
+---
+title: "ARIMA"
+output:
+  word_document: default
+  html_document: default
+date: "2025-04-13"
+---
+
+Autoregressive Integrated Moving Average (ARIMA) models were popularized by Box and Jenkins that has a systematic approach for time series analysis and forecasting and consists of three phases: identification, estimation and diagnostic checking, and forecasting. ARIMA models are widely used for analyzing and forecasting time series data, especially when the data exhibit non-stationarity and autocorrelation.
+
+# Data
+
+Do not forget to load the necessary libraries before we jump into the main course!
+
+```{r}
+suppressPackageStartupMessages({
+  library(ggfortify)
+  library(forecast)
+  library(tseries)
+  library(Metrics)
+  library(lmtest)
+  library(fpp2)
+})
+```
+
+## Luteinizing Hormone in Blood Samples
+
+A regular time series giving the luteinizing hormone in blood samples at 10 mins intervals from a human female, 48 samples.
+
+```{r}
+lh
+```
+
+## Your Own Data (Delete '\#' before use it)
+
+```{r}
+x<-ts(c(13,8,15,4,4,12,11,7,14,12), start=c(2014, 1), end=c(2014,10), frequency = 12)
+ts.plot(x)
+```
+
+# ARIMA Modeling and Forecasting
+
+## 1. Plot the Data
+
+Plot the data to visually detect unsual observations and inspect its patterns, trends, and seasonality. It is important to understand characteristics of the data before proceeding with modeling.
+
+```{r}
+autoplot(lh)
+```
+
+## 2. Box-Cox Transformation (if necessary)
+
+We will apply Box-Cox transformation to stabilise the variance.
+
+```{r}
+lambda <- BoxCox.lambda(lh)
+lambda
+```
+
+## 3. Check Stationary
+
+ARIMA models require the data to be stationary, meaning that its statistical properties such as mean and variance remain constant over time. We can conduct test such as the Augmented Dickey-Fuller (ADF) test to check for stationarity. The null hypothesis for this test is that the time series data has a unit root, indicating it is non-stationary. If the data is non-stationary, apply differencing to make it stationary.
+
+```{r}
+adf.test(lh) # already stationary
+```
+
+```{r}
+lh_nonstationary <- diffinv(lh)
+adf.test(lh_nonstationary)
+```
+
+```{r}
+lh_stationary <- diff(lh)
+adf.test(lh_stationary)
+```
+
+## 4. Examine ACF and PACF
+
+After ensure the data is already stationary, we have to identify the parameter such as the autoregressive ($p$), differencing ($d$), and moving average ($q$) parameters. Use techniques like autocorrelation function (ACF) and partial autocorrelation function (PACF) plots to identify potential values for $p$ and $q$. The differencing parameter $d$ is determined based on the number of differences needed to achieve stationarity.
+
+```{r}
+Acf(lh) # q = 1
+Pacf(lh) # p = 1
+```
+
+The blue dash line depicts the 95% confidence interval and is in indicator for the significance threshold. That means, anything within the blue area is statistically close to zero and anything outside the blue area is statistically non-zero. From the figure, we can see that there's spike that go over above the threshold at lag 1 for both ACF and PACF plots so the orders of p and q currently is 1.
+
+## 5. Try Model(s) & Pick Best Model
+
+Once the parameters (p, d, q) are identified, estimate the ARIMA model by fitting the model to the data and estimating the coefficients of the autoregressive and moving average terms. Use the AIC value to determine your final model.
+
+```{r}
+model1 <- Arima(lh,c(0,0,1),lambda="auto")
+model2 <- Arima(lh,c(1,0,0),lambda="auto")
+model3 <- Arima(lh,c(0,0,0),lambda="auto")
+model4 <- Arima(lh,c(1,0,1),lambda="auto")
+
+c(AIC(model1),AIC(model2),AIC(model3),AIC(model4))
+```
+
+The pick went to model 2 or $AR(1)$ that has a smallest AIC value among all models.
+
+```{r}
+best_model <- model2
+summary(model2)
+```
+
+```{r}
+c = 0.5854*(1-0.5457)
+c
+```
+
+Then, the autoregressive model of order $1$
+
+$$
+\hat{y}_t=c+0.5457\hat{y}_{t-1}
+$$
+
+where $c=0.5854\times(1-0.5457)=0.2659$.
+
+## 6. Check White Noise
+
+After estimating the model, conduct diagnostic checks of the residuals to assess its adequacy. We can use statistical tests like the Ljung-Box test to assess the model's goodness-of-fit.
+
+### a. Normality Test
+
+Conduct a normality test (Kolmogorov-Smirnov test in this case) on the residuals to ensure they are approximately normally distributed.
+
+```{r}
+r <- residuals(best_model)
+n	<- length(r) 
+mean	<- mean(r)
+sd	<- sd(r)
+res	<- rnorm(n,mean,sd)
+
+ks.test(r,res)
+```
+
+A high p-value from result above suggests that the residuals is normally distributed.
+
+### b. Autocorrelation Test
+
+Ljung-Box test on the residuals is use to test for autocorrelation. The null hypothesis is that the autocorrelations of the residuals are zero at all lags.
+
+```{r}
+Box.test(r,lag=1,type=c("Ljung-Box"))
+```
+
+The p-value is greater than significance level 0.05 which indicates there is no autocorrelation in the residuals. This suggests that the residuals are white noise.
+
+### c. Homoscedasticity Test
+
+Lastly, we have to ensure that the variance of the residuals is constant over time. If the p-value is less than a chosen significance level (e.g., 0.05), it indicates the heteroscedasticity issue in the residuals.
+
+```{r}
+h	<- r^2
+Box.test(h,lag=1,type=c("Ljung-Box"))
+```
+
+The test returns a p-value that greater than the significance value, indicating the residuals are homoscedastic.
+
+## 7. Forecast
+
+```{r}
+autoplot(forecast(best_model,5))
+```
+
+The forecast of the selected model is shown as above. For the next five periods, the amount of LH in blood samples will decrease slightly.
